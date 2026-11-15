@@ -23,7 +23,7 @@ new interface with FM and conventional/trunked P25.
 | Conventional P25 · Original RadioFoundry interface | Trunked P25 · New interface |
 | ![Classic P25 channel settings with talkgroup and NAC](images/classic-settings.png) | ![Next P25 system settings with WACN and System ID](images/next-settings.png) |
 | P25 channel settings: talkgroup, NAC, and radio ID | Trunked system settings: WACN and System ID |
-| **0.1.0-rc1-r7 release candidate available** | **Source will be provided on release.** |
+| **0.1.0-rc1-r8 release candidate available** | **Source will be provided on release.** |
 
 | Feature | Classic | Next |
 | --- | --- | --- |
@@ -51,11 +51,18 @@ Encryption support is still being tested with other radios and systems.
 ## Release status
 
 **Classic and Next are alpha firmware, and testing is still underway.**
-Classic **0.1.0-rc1-r7** is available in the
+Classic **0.1.0-rc1-r8** is available in the
 [Firmware Utility](https://kd8zmm.com/open25-dm32/firmware.html), under
 **Open25-DM32 Classic → Standard · DM-32UV**. Final on-air qualification is
 incomplete; compatibility with every DM-32UV hardware revision is not established.
 Next remains unavailable, with its release date to be determined.
+
+Revision r8 adds separate receive and transmit NACs for conventional P25.
+Existing channels default to **Same as RX** for transmit. A separate TX NAC
+also permits receive NAC `F7E` (accept any) with a concrete transmit NAC.
+Channels using a separate TX NAC require r8 or newer; older Classic versions
+skip those channels. This revision passes software and target-build checks;
+radio/bench verification was not performed for this release.
 
 Revision r7 improves repeated P25 calls, receive recovery and switching between
 FM, DMR and P25. It keeps local warning beeps from interrupting P25 voice and
