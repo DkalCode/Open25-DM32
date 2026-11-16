@@ -198,7 +198,9 @@ def prepare():
         ('\t\traw_keys = keys;', '\t\traw_keys = keys;\n#if CONFIG_DEV_TX\n\t\tconst keymap_entry_t *ptt = keys && !ptt_blocked ? key_for(ACT_PTT, false) : NULL;\n\t\tbool physical_down = ptt && (keys & (1u << ptt->bit));\n\t\tif (physical_down != physical_ptt) {\n\t\t\tphysical_ptt = physical_down;\n\t\t\tradio_req_physical_ptt(physical_down);\n\t\t}\n#endif'),
     ])
     transform("core/input/input.h", [("uint32_t input_raw_keys(void);", "uint32_t input_raw_keys(void);\n#if CONFIG_DEV_TX\nbool input_physical_ptt(void);\nbool input_ptt_down(void);\n#endif")])
-    transform("core/radio/radio.h", [("void radio_req_ptt(bool down);", "void radio_req_ptt(bool down);\n#if CONFIG_DEV_TX\nvoid radio_req_physical_ptt(bool down);\n#endif")])
+    transform("core/radio/radio.h", [("void radio_req_ptt(bool down);", "void radio_req_ptt(bool down);\n#if CONFIG_DEV_TX\nvoid radio_req_physical_ptt(bool down);\n#endif"),
+        # Classic: P25 TX may use every band the radio transmits on, not only 2 m / 70 cm (off by default).
+        ("\tbool tx_inhibit;\t// refuse every transmission", "\tbool tx_inhibit;\t// refuse every transmission\n\tbool p25_full_band;\t// Classic: P25 TX on the radio's full TX bands, not only 2 m / 70 cm")])
     transform("core/radio/radio_task.c", [
         ('#include "config.h"', '#include "config.h"\n#if CONFIG_P25_NATIVE\n#include "native_modem/native_lab.h"\n#endif'),
         ('for (;;) {\n\t\tTickType_t due', 'radio_req_t req;\n    bool retained_request=false;\n\tfor (;;) {\n#if CONFIG_P25_NATIVE\n\t\tnative_lab_service(&sm,hal_micros());\n#endif\n\t\tTickType_t due'),

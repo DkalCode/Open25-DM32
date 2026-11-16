@@ -161,6 +161,7 @@ static inline bool codeplug_p25_valid(const channel_t *ch)
 \tbool ok = materialize() && flash_read(channel_addr(number), r, sizeof(r));'''),
     ])
     transform('core/ui/ui_menus.c', [
+        ('\tLIST(TRN("SFR CW ID"), "single frequency repeater morse callsign identify", UI_SET_SFR_CWID, v_sfrcwid, n_sfrcwid),\n#endif\n};', '\tLIST(TRN("SFR CW ID"), "single frequency repeater morse callsign identify", UI_SET_SFR_CWID, v_sfrcwid, n_sfrcwid),\n#endif\n#if CONFIG_P25_CHANNELS\n\tTOGGLE(TRN("P25 full-band TX"), "unlock commercial business frequency range transmit", UI_SET_P25_FULL_BAND),\n#endif\n};'),
         ('ui_toast(i == UI_CP_NEW ? TR("New codeplug started") : TR("Old codeplug kept: edit again"));',
          'ui_toast(i == UI_CP_NEW ? TR("Creating codeplug") : TR("Old codeplug kept: edit again"));'),
         ('static void contacts_item(uint16_t i, ui_item_t *it)', 'static void __attribute__((unused)) contacts_item(uint16_t i, ui_item_t *it)'),
@@ -183,15 +184,20 @@ static inline bool codeplug_p25_valid(const channel_t *ch)
         ('ced_edit == CE_TX_TONE) && ced_len > 0)', 'ced_edit == CE_TX_TONE\n#if CONFIG_P25_CHANNELS\n             || ced_edit == CE_P25_TG || ced_edit == CE_P25_ID\n#endif\n             ) && ced_len > 0)'),
     ])
     transform('core/ui/ui_screens.c', [
+        ('\tcase TXDENY_BAND: {\n\t\tchar bands[32];', '\tcase TXDENY_BAND: {\n#if CONFIG_P25_CHANNELS\n\t\tif (codeplug_mode_p25(v->ch.mode) && !ui_svc_setting_get(UI_SET_P25_FULL_BAND) &&\n\t\t    board_in_band(v->ch.tx_hz, true)) {\n\t\t\tsb_str(&b, TR("P25 TX: 144-148 420-450"));\n\t\t\tbreak;\n\t\t}\n#endif\n\t\tchar bands[32];'),
+        ('\tcase TXDENY_BAND: return v->vfo ?', '\tcase TXDENY_BAND:\n#if CONFIG_P25_CHANNELS\n\t\tif (codeplug_mode_p25(v->ch.mode) && !ui_svc_setting_get(UI_SET_P25_FULL_BAND) &&\n\t\t    board_in_band(v->ch.tx_hz, true))\n\t\t\treturn TR("Or turn on P25 full-band TX");\n#endif\n\t\treturn v->vfo ?'),
         ('return v->ch.mode == RADIO_MODE_DMR ? "DMR" : v->am ? "AM" : "FM";', 'return codeplug_mode_p25(v->ch.mode) ? "P25" : v->ch.mode == RADIO_MODE_DMR ? "DMR" : v->am ? "AM" : "FM";'),
     ])
     transform('core/ui/ui_svc.h', [
         ('} ui_event_kind_t;', '\tUI_EV_CODEPLUG_STARTED,\t// Start new and its held edit finished successfully\n} ui_event_kind_t;'),
+        ('\tUI_SET_COUNT\n} ui_setting_t;', '\tUI_SET_P25_FULL_BAND,\t// Classic: P25 TX on the full TX bands (Settings > Talk & listen; radio_settings_t.p25_full_band)\n\tUI_SET_COUNT\n} ui_setting_t;'),
     ])
     transform('core/ui/ui_app.c', [
         ('\tcase UI_EV_CODEPLUG_FOREIGN:', '\tcase UI_EV_CODEPLUG_STARTED:\n\t\tui_toast(TR("New codeplug started"));\n\t\tbreak;\n\tcase UI_EV_CODEPLUG_FOREIGN:'),
     ])
     transform('core/ui/ui_svc_storage.c', [
+        ('\tcase UI_SET_TALK_PERMIT:\n\t\tradio_get_settings(&rs);\n\t\treturn rs.talk_permit;', '\tcase UI_SET_TALK_PERMIT:\n\t\tradio_get_settings(&rs);\n\t\treturn rs.talk_permit;\n\tcase UI_SET_P25_FULL_BAND:\n\t\tradio_get_settings(&rs);\n\t\treturn rs.p25_full_band;'),
+        ('\tcase UI_SET_REPLY_S:\n\tcase UI_SET_TALK_PERMIT:\n', '\tcase UI_SET_REPLY_S:\n\tcase UI_SET_TALK_PERMIT:\n\tcase UI_SET_P25_FULL_BAND:\n'),
         ('static void save_failed_text(const char *text)\n{',
          'static bool cp_write_failed;\t// result of the held edit, owned by the storage job\n\nstatic void save_failed_text(const char *text)\n{\n\tcp_write_failed = true;'),
         ('\tvoid (*fn)(void *ctx) = cp_jobs[job.held - 1u];', '''\tvoid (*fn)(void *ctx) = cp_jobs[job.held - 1u];
@@ -207,6 +213,12 @@ static inline bool codeplug_p25_valid(const channel_t *ch)
 \t\t\tui_notify(&ev);
 \t\t}'''),
     ])
+    transform('core/settings/settings.h', [
+        ('#define SETTINGS_RS_NO_TALK_PERMIT\t0x20u\t// the talk permit tone off (0 = on, as before)', '#define SETTINGS_RS_NO_TALK_PERMIT\t0x20u\t// the talk permit tone off (0 = on, as before)\n#define SETTINGS_RS_P25_FULL_BAND\t0x40u\t// Classic: P25 TX on the full TX bands (0 = 2 m / 70 cm only)'),
+    ])
+    transform('core/ui/ui_svc_radio.c', [
+        ('\tcase UI_SET_TALK_PERMIT:\n\t\trs.talk_permit = value != 0;\n\t\tbreak;', '\tcase UI_SET_TALK_PERMIT:\n\t\trs.talk_permit = value != 0;\n\t\tbreak;\n\tcase UI_SET_P25_FULL_BAND:\n\t\trs.p25_full_band = value != 0;\n\t\tbreak;'),
+    ])
     transform('core/radio/radio_sm.h', [
         ('void radio_sm_poll(radio_sm_t *sm, uint32_t now_ms);', '''void radio_sm_poll(radio_sm_t *sm, uint32_t now_ms);
 uint8_t radio_sm_tx_check(const radio_sm_t *sm);
@@ -215,6 +227,8 @@ void radio_sm_native_maintenance(radio_sm_t *sm, uint32_t now_ms);
 #endif'''),
     ])
     transform('core/radio/radio_sm.c', [
+        ('\ts->talk_permit = (st->rs_flags & SETTINGS_RS_NO_TALK_PERMIT) == 0;', '\ts->talk_permit = (st->rs_flags & SETTINGS_RS_NO_TALK_PERMIT) == 0;\n\ts->p25_full_band = (st->rs_flags & SETTINGS_RS_P25_FULL_BAND) != 0;'),
+        ('(s->talk_permit ? 0 : SETTINGS_RS_NO_TALK_PERMIT));', '(s->talk_permit ? 0 : SETTINGS_RS_NO_TALK_PERMIT) |\n\t\t\t\t (s->p25_full_band ? SETTINGS_RS_P25_FULL_BAND : 0));'),
         ('#include "config.h"', '#include "config.h"\n#if CONFIG_P25_CHANNELS\n#include "p25/p25_lab.h"\n#endif'),
         ('\tshared = ambeVoiceStreaming();\n#endif', '\tshared = ambeVoiceStreaming();\n#endif\n#if CONFIG_P25_CHANNELS\n\tshared = shared || p25_lab_busy();\n#endif', 2),
         ('static uint8_t tx_check(const radio_sm_t *sm)', 'uint8_t radio_sm_tx_check(const radio_sm_t *sm)'),
@@ -232,7 +246,7 @@ void radio_sm_native_maintenance(radio_sm_t *sm, uint32_t now_ms);
 \tif (ch->tx_hz == 0) {'''),
         ('\tif (!board_in_band(ch->tx_hz, true)) {', '''\tif (!board_in_band(ch->tx_hz, true)
 #if CONFIG_P25_CHANNELS
-\t    || (codeplug_mode_p25(ch->mode) &&
+\t    || (codeplug_mode_p25(ch->mode) && !sm->set.p25_full_band &&
 \t        !((ch->tx_hz > 144000000u && ch->tx_hz < 148000000u) ||
 \t          (ch->tx_hz > 420000000u && ch->tx_hz < 450000000u)))
 #endif
