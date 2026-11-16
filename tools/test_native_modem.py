@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Native modem control/register/protocol host tests. No radio or serial access."""
 from pathlib import Path
 import subprocess
@@ -9,10 +9,11 @@ UP=ROOT/"research/upstream/radiofoundry"
 def run(args): subprocess.run([str(x) for x in args],cwd=ROOT,check=True)
 def main():
     OUT.mkdir(parents=True,exist_ok=True)
+    run(["python3","tools/sources.py","verify-vendored"])
     run(["python3","tools/build_radiofoundry.py","--prepare-only"])
     app=ROOT/"build/radiofoundry-p25"
     flags=["-std=c11","-O1","-g","-Wall","-Wextra","-Werror","-fsanitize=address,undefined","-fno-omit-frame-pointer",
-           "-Isrc/modem","-Iintegration/radiofoundry/native","-I"+str(UP/"drivers")]
+           "-Isrc/modem","-Iintegration/radiofoundry/native","-Ithird_party/p25cai/include","-I"+str(UP/"drivers")]
     run(["clang",*flags,"src/modem/native_test.c","integration/radiofoundry/native/hrc_native_chip.c",
          "tests/native/test_native.c","-o",OUT/"test_native"])
     run([OUT/"test_native"])

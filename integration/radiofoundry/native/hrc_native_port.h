@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* SPDX-License-Identifier: MIT */
 #ifndef HRC_NATIVE_PORT_H
 #define HRC_NATIVE_PORT_H
 #include "hrc_native_chip.h"

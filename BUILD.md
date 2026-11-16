@@ -13,8 +13,9 @@ make radiofoundry
 `make radiofoundry` selects Classic: original RadioFoundry UI, FM, DMR and
 saved conventional P25 channels. It enables normal PTT, storage, channel editing
 and CPS. It omits the first-boot restrictions and bench replay controls.
-The embedded codec uses fixed-point fast paths; no trunking or newer UI source
-is needed. Dependencies are pinned in `sources.lock.json` and the build recipe.
+The embedded full-rate IMBE codec uses fixed-point C and caller-owned storage;
+no Rust toolchain, trunking or newer UI source is needed. Dependencies and codec
+snapshots are pinned in `sources.lock.json` and the build recipe.
 
 For a release candidate, also verify a forced rebuild:
 
@@ -24,18 +25,37 @@ make test
 ```
 
 The builder rejects target compiler warnings, checks the ABI and records source,
-generated-source and output hashes. `make test` covers protocol/FEC, codec,
+generated-source and output hashes. `make test` covers the standalone CAI
+library with sanitizers, conventional protocol/FEC, codec,
 audio, native modem ownership, the FM/DMR state machine, P25 channel persistence
 and the original UI's P25 editor. Host checks do not establish RF interoperability.
 
+Phase 1 wire coding and framing use the pinned library in
+`third_party/p25cai`; the existing conventional `p25.h` interface is retained.
+`sources.lock.json` owns the snapshot revision, exact file hashes and the two
+caller-binding copies in `src/p25`. Builds and host tests reject a changed
+snapshot or binding. To refresh, select a reviewed library revision, replace
+the snapshot and both bindings together, update its lock record, and run
+`python3 tools/sources.py verify-vendored` followed by the full tests and
+target checks. Keep library changes with its source owner and refresh these
+copies from that revision. The codec and application policy keep their
+existing interfaces and notices.
+
+The same snapshot rule applies to `third_party/imbe`: its source owner supplies
+the copied `src/codec/dm32_imbe.h` and `src/runtime/memory.c`. The lock verifies
+all three together. Refresh Classic and Next from the same reviewed library
+revision. A context/layout change requires complete application RAM/stack checks.
+The target memory implementation is compiled with the measured `-O2` per-file
+preset; other application files retain their existing build optimization.
+
 Output is under `build/radiofoundry-p25/build/dm32-p25-classic/`.
 The application has no proprietary AMBE codec. To make the same application-only
-ZIP offered by the Firmware Utility:
+ZIP offered by Flasher v3:
 
 ```sh
 python3 tools/prepare_web_firmware.py \
   --image build/radiofoundry-p25/build/dm32-p25-classic/rfoundry_dm32.bin \
-  --out artifacts/firmware/Open25-DM32-Classic-0.1.0-rc1-r8-application.zip
+  --out artifacts/firmware/Open25-DM32-Classic-0.1.0-rc1-r8-mit-application.zip
 ```
 
 The packager verifies the application and linker-map hashes against the build
@@ -57,21 +77,21 @@ including the codec area.
 Local `--with-local-stock` unit images contain proprietary material and must stay
 private; they are not inputs to this public packager.
 
-In the channel editor, change Mode from DMR to P25, then set Talkgroup, RX NAC,
-TX NAC, and P25 Radio ID. Up/Down selects one of the three hexadecimal NAC
-digits. The knob changes its value and the number keys enter 0–9. TX NAC
-defaults to **Same as RX**. Confirming a numeric TX NAC sets an explicit
-override, even when it equals RX NAC. To restore **Same as RX**, open the TX NAC
-editor, press Down from the first digit, then press OK. RX NAC `F7E` accepts
-any receive NAC. A transmit-enabled channel
-with RX NAC `F7E` needs a concrete TX NAC, a nonzero talkgroup, and a radio ID
-from 1 through 9999999. TX rejects `F7E` and `F7F`, and RX rejects `F7F`.
+In the channel editor, choose P25 mode and set Talkgroup, RX NAC, TX NAC and
+P25 Radio ID. NAC values have three hexadecimal digits. TX NAC initially shows
+**Same as RX**; confirming it unchanged keeps that inheritance. Typing a number
+creates an explicit TX NAC, even if it equals RX. In the TX editor, Down from
+the first digit selects **Same as RX** again. A numeric override stays fixed
+when RX NAC changes. Up/Down moves between digits and the knob changes a digit.
 
-Existing FM/DMR and single-NAC P25 records retain their layouts. A P25 record
-with a TX override uses tag `E` in the high nibble of byte `0x2C` and stores
-the concrete TX NAC as a little-endian word at `0x22`. Legacy P25 records
-use tag `D` and derive TX NAC from RX NAC. Older Classic firmware skips
-split-NAC records because it only recognizes tag `D`.
+RX NAC `F7E` accepts any NAC; transmitting from that channel requires a concrete
+TX override. TX NAC `000` is valid; TX `F7E`/`F7F` and RX `F7F` are rejected.
+Transmit still requires a nonzero talkgroup and radio ID from 1 to 9999999.
+
+Legacy single-NAC records retain their encoding. Explicit TX NAC uses the public
+Classic r8 format: high nibble `E` at byte `0x2C`, with TX NAC little-endian at
+`0x22`. Inherited TX uses tag `D`. Older Classic firmware skips tag `E` records;
+use a split-NAC-aware build to read them. No second channel store is introduced.
 
 Selected-channel P25 is supported; P25 scanning and VFO are not in this candidate.
 FM/DMR scanning skips P25 entries. Normal radio protections remain active.

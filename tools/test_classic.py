@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Classic saved-channel and real radio-state-machine regression tests."""
 from pathlib import Path
 import subprocess
@@ -17,12 +17,14 @@ def run(args, **kw):
     return subprocess.run([str(a) for a in args],check=True,**kw)
 
 def main():
+    run(['python3',ROOT/'tools/sources.py','verify-vendored'],cwd=ROOT)
     run(['python3',ROOT/'tools/build_radiofoundry.py','--prepare-only'],cwd=ROOT)
     OUT.mkdir(parents=True,exist_ok=True)
     host=APP/'tests/host'
     flags=['-std=gnu99','-Wall','-Wextra','-Wno-unused-parameter','-g',
            '-fsanitize=address,undefined','-fno-sanitize-recover=undefined','-fno-omit-frame-pointer',
            '-I'+str(APP/'core'),'-I'+str(APP/'drivers'),'-I'+str(APP/'hal'),'-I'+str(host),
+           '-I'+str(ROOT/'third_party/p25cai/include'),
            '-D__attribute__(x)=','-DCONFIG_P25_CHANNELS=1','-DCONFIG_P25_NATIVE=1']
     run(['clang',*flags,'-ffunction-sections','-fdata-sections','-DCONFIG_DEV_TX=1',
          '-DCONFIG_P25_BENCH=0','-I'+str(ROOT/'tests/audio/stubs'),

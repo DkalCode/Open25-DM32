@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* Host-only double for the real interrupt-port translation unit. */
 #ifndef NATIVE_HOST_PLATFORM_H
 #define NATIVE_HOST_PLATFORM_H

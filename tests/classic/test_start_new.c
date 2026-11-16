@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* SPDX-License-Identifier: MIT */
 /* Real UI storage job, settings owner, codeplug and journal on the DM32 flash map. */
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,10 +1,12 @@
-/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* SPDX-License-Identifier: MIT */
 /* Included only in the separate derivative's board radio translation unit. */
 #if CONFIG_P25_NATIVE
 #include "hrc_native_port.h"
 static hn_chip native_chip;
 nt_ops dm32_native_ops;
 #if CONFIG_DEV_TX
+/* p25_lab.h also exposes programming/UI types; the board needs only this edge. */
+void p25_lab_live_key(void);
 void dm32_native_mic_route(bool on)
 {
     if (on) {
@@ -44,6 +46,9 @@ static void native_off(void *ctx) {
 static void native_key(void *ctx)
 {
     (void)ctx;
+#if CONFIG_DEV_TX
+    p25_lab_live_key();
+#endif
     dmr_rf_switch(true);
     hrc_timer_oneshot(TIMER_PA,DMR_PA_DELAY_US);
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
-"""Reproducible, local GPL-compatible RadioFoundry conventional P25 derivative.
+# SPDX-License-Identifier: MIT
+# Portions Copyright (c) 2026 The RadioFoundry Authors; see LICENSES/RadioFoundry-MIT.txt.
+"""Reproducible, local RadioFoundry conventional P25 integration.
 
 Never opens a serial port, flashes a radio or modifies the pristine checkout.
 Classic provides FM, DMR and saved conventional P25 channels.
@@ -17,7 +18,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
-from tools import codec_cache, classic_channels
+from tools import codec_cache, classic_channels, sources
 UP = ROOT / "research/upstream/radiofoundry"
 PIN = "dfbaf20c400c73e2ccf6edb80af7d1d255bee418"
 DEST = ROOT / "build/radiofoundry-p25"
@@ -35,6 +36,8 @@ def git(path, *args):
 
 def write_owned(path, content, original=None):
     key = str(path.relative_to(DEST))
+    if path.is_symlink():
+        raise SystemExit(f"Preserving unexpected linked input: {path}")
     if (path.exists() and path.read_bytes() not in (content, original) and
         hashlib.sha256(path.read_bytes()).hexdigest() != OWNED.get(key)):
         raise SystemExit(f"Preserving unexpected local changes: {path}")
@@ -57,6 +60,7 @@ def transform(relative, replacements):
 
 
 def prepare():
+    sources.verify_vendored()
     if not UP.exists():
         run(["git", "clone", "--no-checkout", "https://github.com/RadioFoundry/RadioFoundry", UP])
         run(["git", "-C", UP, "checkout", "--detach", PIN])
@@ -87,8 +91,10 @@ def prepare():
         ('#define RFOUNDRY_CONFIG_H\n', '#define RFOUNDRY_CONFIG_H\n#ifndef CONFIG_P25_CHANNELS\n#define CONFIG_P25_CHANNELS 0\n#endif\n#ifndef CONFIG_P25\n#define CONFIG_P25 0\n#endif\n#ifndef CONFIG_P25_NATIVE\n#define CONFIG_P25_NATIVE 0\n#endif\n#ifndef CONFIG_P25_BENCH\n#define CONFIG_P25_BENCH 1\n#endif\n#ifndef CONFIG_DEV_UPDATE\n#define CONFIG_DEV_UPDATE 0\n#endif\n#ifndef CONFIG_DEV_TX\n#define CONFIG_DEV_TX 0\n#endif\n#ifndef CONFIG_CPU_PROFILE\n#define CONFIG_CPU_PROFILE 0\n#endif\n#ifndef CONFIG_FIRSTBOOT\n#define CONFIG_FIRSTBOOT 0\n#endif\n#if CONFIG_FIRSTBOOT\n#include "firstboot/firstboot.h"\n#endif\n'),
     ])
     transform("Makefile", [
-        ("APP_DIRS := $(CORE_DIRS)", "ifeq ($(CONFIG_P25),y)\nCORE_DIRS += core/p25\nP25_LIB := core/p25/libdm32_imbe.a\nendif\nifeq ($(CONFIG_P25_NATIVE),y)\nCORE_DIRS += core/native_modem\nendif\nifeq ($(CONFIG_FIRSTBOOT),y)\nCORE_DIRS += core/firstboot\nendif\nAPP_DIRS := $(CORE_DIRS)"),
-        ("INCLUDES := -Ihal", "INCLUDES := -Icore/p25 -Icore/native_modem -Ihal"),
+        ("APP_DIRS := $(CORE_DIRS)", "ifeq ($(CONFIG_P25),y)\nCORE_DIRS += core/p25 core/p25/cai\nP25_LIB := core/p25/libdm32_imbe.a\nendif\nifeq ($(CONFIG_P25_NATIVE),y)\nCORE_DIRS += core/native_modem\nendif\nifeq ($(CONFIG_FIRSTBOOT),y)\nCORE_DIRS += core/firstboot\nendif\nAPP_DIRS := $(CORE_DIRS)"),
+        ('$(BUILD)/core/hostlink/build_info.o: CFLAGS_APP +=',
+         '$(BUILD)/core/p25/memory.o: CFLAGS_APP += -O2 -fno-builtin -fno-tree-loop-distribute-patterns -fno-lto\n$(TARGET).elf: LDFLAGS += -Wl,-z,noexecstack\n\n$(BUILD)/core/hostlink/build_info.o: CFLAGS_APP +='),
+        ("INCLUDES := -Ihal", "INCLUDES := -Icore/p25 -Icore/p25/cai -Icore/native_modem -Ihal"),
         ("$(TARGET).elf: $(OBJ) $(LDSCRIPT)", "$(TARGET).elf: $(OBJ) $(P25_LIB) $(LDSCRIPT)"),
         ("-o $@ $(OBJ) -lm", "-o $@ $(OBJ) $(P25_LIB) -lm"),
     ])
@@ -116,9 +122,16 @@ def prepare():
     ])
     transform("hal/board.h", [("const hal_radio_t *radio;", "const struct nt_ops *native_modem; /* optional derivative native PHY test backend */\n\tvoid (*native_mic_route)(bool on);\n\tconst hal_radio_t *radio;")])
     transform("hal/hal_audio.h", [("bool (*spk_pending)(void);", "bool (*spk_pending)(void);\n\t/* Optional laboratory playback pacing and fixed read-only diagnostics. */\n\tvoid (*playback_pace)(bool on);\n\tvoid (*playback_stats)(uint32_t out[16]);")])
+    transform("platform/hrc7000/audio_pcm.h", [
+        ('void hrc_audio_pcm_hold(bool on);', 'void hrc_audio_pcm_hold(bool on);\n#if CONFIG_P25\nbool hrc_audio_pcm_amp_wanted(void);\n#endif'),
+    ])
     transform("platform/hrc7000/audio_pcm.c", [
+        ('\tfifo_held = on;', '\tfifo_held = on;\n#if CONFIG_P25\n\tplayback_amp_update();\n#endif'),
+        ('\t\ttx_gated = true;', '\t\ttx_gated = true;\n#if CONFIG_P25\n\t\tplayback_amp_update();\n#endif'),
         ('static void gate_check(void);', 'static void gate_check(void);\n#include "pcm_playback.inc"'),
-        ('hrc7000_prompt_push(modem, &spk_q[spk_tail][spk_pos])', 'playback_push(&spk_q[spk_tail][spk_pos])'),
+        ('static void fifo_feed(void)\n{', 'static void fifo_feed(void)\n{\n#if CONFIG_P25\n\tplayback_amp_update();\n#endif'),
+        ('\tspk_routed = on;', '\tspk_routed = on;\n#if CONFIG_P25\n\tplay_amp_on = playback_amp_want();\n#endif'),
+        ('hrc7000_prompt_push(modem, &spk_q[spk_tail][spk_pos])' , 'playback_push(&spk_q[spk_tail][spk_pos])'),
         ('\t\t\tspk_tail = (uint8_t)((spk_tail + 1u) % SPK_BLOCKS);\n\t\t}\n\t}', '\t\t\tspk_tail = (uint8_t)((spk_tail + 1u) % SPK_BLOCKS);\n\t\t}\n#if CONFIG_P25\n\t\tif (play_paced) break;\n#endif\n\t}'),
         ('\t\t\tcb(mic, discard, block_ctx);', '#if CONFIG_P25\n\t\t\tplay_diag[8]++;\n#endif\n\t\t\tcb(mic, discard, block_ctx);'),
         ('\t\t\t\tspk_head = next;\n\t\t\t}', '\t\t\t\tspk_head = next;\n\t\t\t}\n#if CONFIG_P25\n\t\t\telse play_diag[9]++;\n#endif'),
@@ -136,6 +149,13 @@ def prepare():
     ])
     transform("boards/dm32/dm32.h", [("#include <stdbool.h>", "#include <stdbool.h>\n#if CONFIG_P25_NATIVE\n#include \"native_test.h\"\nextern nt_ops dm32_native_ops;\n#endif\n#if CONFIG_DEV_TX\nvoid dm32_native_mic_route(bool on);\n#endif")])
     transform("boards/dm32/radio_dm32.c", [
+        # Own the microphone route before any preemptible TX setup writes.
+        ('\thrc_dac_b_power(true);\n\tif (mode == RADIO_MODE_DMR) {',
+         '\thrc_dac_b_power(true);\n\ttransmitting = true;\n\tif (mode == RADIO_MODE_DMR) {'),
+        ('\ttransmitting = true;\n\tring_play();\n\treturn true;',
+         '\tring_play();\n\treturn true;'),
+        ('\t\tif (on) {\n\t\t\tamp(AMP_PCM, true);\n\t\t}\n\t}\n\thrc_irq_restore(s);',
+         '\t\tif (on) {\n#if !CONFIG_P25\n\t\t\tamp(AMP_PCM, true);\n#endif\n\t\t}\n\t}\n#if CONFIG_P25\n\tif (on) amp(AMP_PCM, hrc_audio_pcm_amp_wanted());\n#endif\n\thrc_irq_restore(s);'),
         ("static void pa_key(void)\n{", "static void pa_key(void)\n{\n#if CONFIG_FIRSTBOOT\n\tif (!firstboot_tx_allowed(FB_PA_KEY)) { firstboot_deny(FB_PA_KEY); board_rf_safe(); return; }\n#endif"),
         ("static void dmr_rf_switch(bool tx)\n{", "static void dmr_rf_switch(bool tx)\n{\n#if CONFIG_FIRSTBOOT\n\tif (tx && !firstboot_tx_allowed(FB_RF_SWITCH)) { firstboot_deny(FB_RF_SWITCH); board_rf_safe(); return; }\n#endif"),
         ("static bool tx(uint32_t hz, radio_bw_t bw, uint8_t power, const subtone_t *tone)\n{", "static bool tx(uint32_t hz, radio_bw_t bw, uint8_t power, const subtone_t *tone)\n{\n#if CONFIG_FIRSTBOOT\n\tif (!firstboot_tx_allowed(FB_BOARD_TX) || hz!=145500000u || bw!=RADIO_BW_12K5 || power!=0 || mode!=RADIO_MODE_DMR) { firstboot_deny(FB_BOARD_TX); board_rf_safe(); return false; }\n#endif"),
@@ -168,6 +188,7 @@ def prepare():
         ('bool storage_claim_request(void)\n{', 'bool storage_claim_request(void)\n{\n#if CONFIG_FIRSTBOOT\n\treturn firstboot_deny(FB_STORAGE_CLAIM);\n#endif'),
         ('bool storage_claim(void)\n{', 'bool storage_claim(void)\n{\n#if CONFIG_FIRSTBOOT\n\treturn firstboot_deny(FB_STORAGE_CLAIM);\n#endif')])
     transform("platform/hrc7000/common.ld", [
+        ("*(.data .data.* .sdata .sdata.*)", "*(.data .data.* .sdata .sdata.* .ramdata .ramdata.*)"),
         ("*(EXCLUDE_FILE(*hrc7000_dmr.o *hrc7000_bs.o *dmr_glue.o) .text EXCLUDE_FILE(*hrc7000_dmr.o *hrc7000_bs.o *dmr_glue.o) .text.*)",
          "*(EXCLUDE_FILE(*hrc7000_dmr.o *hrc7000_bs.o *dmr_glue.o *native_test.o *hrc_native_chip.o *hrc_native_port.o) .text EXCLUDE_FILE(*hrc7000_dmr.o *hrc7000_bs.o *dmr_glue.o *native_test.o *hrc_native_chip.o *hrc_native_port.o) .text.*)"),
         ("*dmr_glue.o(.text .text.*)", "*dmr_glue.o(.text .text.*)\n\t\t*native_test.o(.text .text.*)\n\t\t*hrc_native_chip.o(.text .text.*)\n\t\t*hrc_native_port.o(.text .text.*)"),
@@ -197,6 +218,16 @@ def prepare():
     # Keep the AMBE code/table windows and full-resolution framebuffer intact.
     transform("boards/dm32/freertos_board.h", [("#define configTOTAL_HEAP_SIZE\t(32 * 1024 + 512)",
         "#if CONFIG_P25 && (CONFIG_P25_BENCH || CONFIG_DEV_TX)\n#define configTOTAL_HEAP_SIZE (40 * 1024 + 512)\n#elif CONFIG_P25\n#define configTOTAL_HEAP_SIZE (36 * 1024 + 512)\n#else\n#define configTOTAL_HEAP_SIZE (32 * 1024 + 512)\n#endif")])
+    # The C-SKY disassembler uses uppercase hex call operands and hexadecimal
+    # SP adjustments. Preserve those edges/frames in the existing checker.
+    transform('tools/stack_check.py', [
+        ('([0-9a-f]+)\\b[^<]*<([^>+]+)>$")',
+         '([0-9a-f]+)\\b[^<]*<([^>+]+)>$", re.IGNORECASE)'),
+        ('m = re.match(r"^subi (?:sp|r14), (?:(?:sp|r14), )?(\\d+)$", ins)\n            if m:\n                cur[1] += int(m.group(1))',
+         'm = re.match(r"^subi (?:sp|r14), (?:(?:sp|r14), )?(0x[0-9a-fA-F]+|\\d+)$", ins)\n            if m:\n                cur[1] += int(m.group(1), 0)'),
+        ('subi      \\tr14, r14, 8', 'subi      \\tr14, r14, 0x8'),
+        ('bsr      \\t0x304ed8c', 'bsr      \\t0x304ED8C'),
+    ])
     classic_channels.prepare(transform)
     # A pending shared beep remains owned by beep.c when digital PCM stops.
     # Reuse the existing own-stream startup and failure cleanup at handoff.
@@ -220,7 +251,32 @@ def prepare():
     for p in sorted((ROOT / "src/p25").glob("*")):
         if p.suffix in (".c", ".h", ".inc"):
             write_owned(DEST / "core/p25" / p.name, p.read_bytes())
+    # This generated table belonged to the retired implementation. Never
+    # remove an unrecognized local input from an existing derivative tree.
+    retired = DEST / "core/p25/golay_table.inc"
+    if retired.exists():
+        key = str(retired.relative_to(DEST))
+        if hashlib.sha256(retired.read_bytes()).hexdigest() != OWNED.get(key):
+            raise SystemExit(f"Preserving unexpected local changes: {retired}")
+        retired.unlink()
+        OWNED.pop(key)
+    cai = ROOT / "third_party/p25cai"
+    cai_inputs = [p for p in [*sorted((cai / "src").glob("*")), cai / "include/p25cai.h"]
+                  if p.suffix in (".c", ".h", ".inc")]
+    expected_cai = {p.name for p in cai_inputs}
+    for p in sorted((DEST / "core/p25/cai").glob("*")):
+        if p.name not in expected_cai:
+            key = str(p.relative_to(DEST))
+            if (not p.is_file() or p.is_symlink() or
+                    hashlib.sha256(p.read_bytes()).hexdigest() != OWNED.get(key)):
+                raise SystemExit(f"Preserving unexpected local changes: {p}")
+            p.unlink()
+            OWNED.pop(key)
+    for p in cai_inputs:
+        write_owned(DEST / "core/p25/cai" / p.name, p.read_bytes())
     write_owned(DEST / "core/p25/dm32_imbe.h", (ROOT / "src/codec/dm32_imbe.h").read_bytes())
+    # Use the same measured memory implementation as the codec target tests.
+    write_owned(DEST / "core/p25/memory.c", (ROOT / "src/runtime/memory.c").read_bytes())
     for p in sorted((ROOT / "integration/radiofoundry").glob("*")):
         if p.suffix in (".c", ".h"):
             write_owned(DEST / "core/p25" / p.name, p.read_bytes())
@@ -232,12 +288,22 @@ def prepare():
     for p in sorted((ROOT / "integration/radiofoundry/firstboot").glob("*")):
         folder="boards/dm32" if p.suffix==".inc" else "platform/hrc7000" if p.name=="firstboot_irq.c" else "core/firstboot"
         write_owned(DEST / folder / p.name,p.read_bytes())
-    write_owned(DEST / "COPYING-P25", (ROOT / "LICENSE").read_bytes())
+    retired_license = DEST / "COPYING-P25"
+    if retired_license.exists():
+        key = str(retired_license.relative_to(DEST))
+        if hashlib.sha256(retired_license.read_bytes()).hexdigest() != OWNED.get(key):
+            raise SystemExit(f"Preserving unexpected local changes: {retired_license}")
+        retired_license.unlink()
+        OWNED.pop(key)
+    write_owned(DEST / "COPYING-OPEN25", (ROOT / "LICENSE").read_bytes())
+    write_owned(DEST / "COPYING-P25-CAI", (cai / "LICENSE").read_bytes())
+    write_owned(DEST / "COPYING-P25-IMBE", (ROOT / "third_party/imbe/LICENSE").read_bytes())
     write_owned(DEST / "P25-DERIVATIVE.txt", (
-        "User-authorized GPL-compatible P25 development derivative.\n"
-        "Original RadioFoundry files remain MIT with their notices. Added P25/IMBE\n"
-        "files retain GPL-3.0-or-later; combined distribution is GPLv3+.\n"
-        "Not an upstream MIT-only contribution. See COPYING-P25 and source manifest.\n"
+        "Classic P25 integration. Preserve all per-file license notices.\n"
+        "Open25 support, RadioFoundry and the pinned CAI library use MIT notices.\n"
+        "The shared fixed-point C full-rate IMBE codec and Open25 interface use MIT notices.\n"
+        "Preserve source provenance and notices in third_party/imbe.\n"
+        "See COPYING-OPEN25, COPYING-P25-CAI, COPYING-P25-IMBE and the source manifest.\n"
         "Classic supports saved conventional P25 channels; final RF qualification is incomplete.\n"
     ).encode())
     OWNED_FILE.write_text(json.dumps(OWNED, indent=2) + "\n")
@@ -259,7 +325,7 @@ def main():
     ap.add_argument("--stack-check", action="store_true", help="include external codec call graphs in static stack report")
     ap.add_argument("--with-local-stock", action="store_true", help="merge recognized local stock AMBE via upstream tool; no redistribution or flashing")
     ap.add_argument("--verify-rebuild", action="store_true", help="force recompilation and require identical application bytes")
-    ap.add_argument("--speed-codec", action="store_true", help="O3 unity fixed-point codec; same DSP with cross-file inlining")
+    ap.add_argument("--speed-codec", action="store_true", help="optimized full-rate IMBE build preset")
     ap.add_argument("--lean", action="store_true", help="omit replay, synthetic self-test and per-sample diagnostics")
     ap.add_argument("--cpu-profile", action="store_true", help="optional RTOS task runtime counters; excluded by default")
     ap.add_argument("--dev-update", action="store_true", help="approved RAM-helper cable entry; TX/write inhibits remain")
@@ -282,7 +348,7 @@ def main():
         return
     if not (ROOT / "toolchain/csky-elf/lib/libc.a").exists():
         run(["sh", ROOT / "tools/bootstrap_newlib.sh"], cwd=ROOT)
-    codec = ROOT / ("build/radiofoundry-codec-speed" if args.speed_codec else "build/radiofoundry-codec")
+    codec = ROOT / "build/radiofoundry-codec-c"
     reused_codec=False
     if not args.disable:
         cache_key=codec_cache.key(ROOT,args.speed_codec)
@@ -337,7 +403,9 @@ def main():
             ci = DEST / b / "p25-codec-ci"
             ci.mkdir(exist_ok=True)
             for p in ci.glob("*.ci"):p.unlink()
-            for p in codec.glob("*.ci"): shutil.copyfile(p, ci / p.name)
+            graph = codec / "c-codec.ci"
+            if not graph.is_file(): raise SystemExit("Missing the current C codec stack graph")
+            shutil.copyfile(graph, ci / graph.name)
         stack_log = ROOT / f"logs/radiofoundry-stack-{suffix}.log"
         stack_args=[]
         if native:
@@ -357,6 +425,7 @@ def main():
                 "start_audio":("playback_pace",),
                 "p25_lab_command":("playback_stats",)}.items():
                 extra+="call "+caller+" "+" ".join(targets)+"\n"
+            extra+="call playback_amp_update dm32_speaker_pcm\n"
             edges.write_text((UP / "tools/stack_check_edges.txt").read_text()+extra)
             stack_args=[f"STACK_CHECK_ARGS=--edges {edges}"]
         with stack_log.open("w") as f:
@@ -404,8 +473,12 @@ def main():
              "--dir", ROOT / "research/originals", "-o", prefix.with_suffix(".codec.bin")], cwd=DEST)
         if not prefix.with_suffix(".codec.bin").exists():
             raise SystemExit("No recognized local stock codec; not claiming preserved DMR voice")
-    inputs = [ROOT / "tools/build_radiofoundry.py", ROOT / "tools/codec_cache.py", ROOT / "tools/classic_channels.py"] + [p for folder in (ROOT / "src/p25", ROOT / "src/modem", ROOT / "src/codec", ROOT / "integration/radiofoundry")
-              for p in folder.rglob("*") if p.is_file()]
+    inputs = [ROOT / "tools/build_radiofoundry.py", ROOT / "tools/codec_cache.py", ROOT / "tools/classic_channels.py",
+              ROOT / "tools/sources.py", ROOT / "sources.lock.json", ROOT / "LICENSE",
+              ROOT / "src/runtime/memory.c", ROOT / "LICENSES/RadioFoundry-MIT.txt"] + [p for folder in
+              (ROOT / "src/p25", ROOT / "src/modem", ROOT / "src/codec", ROOT / "integration/radiofoundry",
+               ROOT / "third_party/p25cai", ROOT / "third_party/imbe")
+              for p in folder.rglob("*") if p.is_file() and "__pycache__" not in p.parts]
     manifest = {"kind": "Open25-DM32 Classic release candidate; hardware qualification required" if args.classic else "RadioFoundry P25 laboratory image",
         "upstream_commit": PIN, "freertos_commit": git(DEST / "third_party/FreeRTOS-Kernel", "rev-parse", "HEAD"),
         "command": [str(x) for x in command], "p25_enabled": not args.disable, "native_interface_enabled":native,

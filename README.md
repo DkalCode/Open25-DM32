@@ -12,8 +12,7 @@ new interface with FM and conventional/trunked P25.
 
 **[Open the tools](https://kd8zmm.com/open25-dm32/)** ·
 **[Next CPS](https://kd8zmm.com/open25-dm32/cps/)** ·
-**[Firmware Utility v1](https://kd8zmm.com/open25-dm32/firmware.html)** ·
-**[Firmware Utility v2](https://kd8zmm.com/open25-dm32/v2/firmware.html)**
+**[Flasher v3](https://kd8zmm.com/open25-dm32/v3/firmware.html)**
 
 ## Choose your edition
 
@@ -52,30 +51,30 @@ Encryption support is still being tested with other radios and systems.
 
 **Classic and Next are alpha firmware, and testing is still underway.**
 Classic **0.1.0-rc1-r8** is available in the
-[Firmware Utility](https://kd8zmm.com/open25-dm32/firmware.html), under
+[Flasher v3](https://kd8zmm.com/open25-dm32/v3/firmware.html), under
 **Open25-DM32 Classic → Standard · DM-32UV**. Final on-air qualification is
 incomplete; compatibility with every DM-32UV hardware revision is not established.
 Next remains unavailable, with its release date to be determined.
 
-Revision r8 adds separate receive and transmit NACs for conventional P25.
-Existing channels default to **Same as RX** for transmit. A separate TX NAC
-also permits receive NAC `F7E` (accept any) with a concrete transmit NAC.
-Channels using a separate TX NAC require r8 or newer; older Classic versions
-skip those channels. This revision passes software and target-build checks;
-radio/bench verification was not performed for this release.
+Revision r8 publishes the project firmware, P25 CAI library and full-rate IMBE
+codec under MIT, with the dependencies' original notices retained. It adds
+separate RX/TX NAC settings, fixes silent first DMR transmissions caused by a
+microphone-routing timing gap, and adds small P25 microphone and amplifier
+changes to address startup clicks and idle hiss.
 
-Revision r7 improves repeated P25 calls, receive recovery and switching between
-FM, DMR and P25. It keeps local warning beeps from interrupting P25 voice and
-preserves DCS signaling while sending DTMF. The underlying fixes were tested
-between two radios; the packaged build passes host regression and target build
-checks. Microphone/speaker audio, every hardware revision and all RF conditions
-have not been qualified.
+The first-call DMR fix was confirmed on a DM-32UV. Full software regression,
+sanitizer, target stack/ABI checks and reproducible rebuild checks pass.
+P25 acoustic changes and every hardware revision have not been fully qualified.
 
-**Known issue:** PL/CTCSS signaling can drop while transmitting DTMF. Avoid
-relying on PL during DTMF until this is resolved.
+**Known issues:** PL/CTCSS signaling can drop while transmitting DTMF. An
+intermittent P25 PTT startup failure with no RF has been reported and remains
+under investigation.
+
+TX NAC defaults to **Same as RX**. A channel with a separate TX NAC requires
+split-NAC-aware firmware; older Classic versions skip those channels.
 
 Revision r6 added RadioFoundry-compatible codec layouts through NRFB .050 and
-extended the modem table window to match. Both flasher versions use the codec
+extended the modem table window to match. The flasher uses the codec
 read from your own radio. No proprietary codec is included.
 
 Revision r5 fixed **Start new** when the radio still contains another firmware's
@@ -89,7 +88,7 @@ and [THIRD_PARTY.md](THIRD_PARTY.md) for dependency notices.
 
 ### Installing Classic
 
-1. Open the Firmware Utility in desktop Chrome or Edge and select Classic.
+1. Open [Flasher v3](https://kd8zmm.com/open25-dm32/v3/firmware.html) in desktop Chrome or Edge and select Classic.
 2. Connect the radio and select the release candidate.
 3. Save and keep a verified full-radio backup before installing.
 4. Install the selected package and check that the radio starts normally.
@@ -109,11 +108,9 @@ use only this radio's backup.
   radio over USB, or save your programming to a file.
 - **[RadioFoundry CPS](https://radiofoundry.org/codeplug/index.html):** edit
   Classic's FM and DMR channels. Program Classic's P25 settings on the radio.
-- **[Firmware Utility v1](https://kd8zmm.com/open25-dm32/firmware.html):** install
-  compatible firmware packages, make verified full-radio backups, and restore
-  your radio from its backup. If v1 isn't working, try
-  **[Firmware Utility v2](https://kd8zmm.com/open25-dm32/v2/firmware.html)**.
-  Both versions use the same firmware catalog and ZIP packages.
+- **[Flasher v3](https://kd8zmm.com/open25-dm32/v3/firmware.html):** install
+  or update firmware, make full-radio backups, restore a backup, or prepare a
+  factory update file.
 
 > [!WARNING]
 > **THERE IS NO EASY WAY TO RESTORE THE RADIO WITHOUT A BACKUP.**
@@ -144,10 +141,12 @@ and cause loss of life.
 ## Credits and license
 
 Open25-DM32 builds on [RadioFoundry](https://github.com/RadioFoundry/RadioFoundry)
-and other open-source projects. Project code is
-[GPL-3.0-or-later](https://github.com/tylerwatt12/Open25-DM32/blob/main/LICENSE)
-unless a file carries a different notice. Original license notices and
-attributions are preserved with the relevant source.
+and other open-source projects. Project code, the P25 CAI library and the
+shared fixed-point C full-rate IMBE codec use the [MIT license](LICENSE).
+The earlier GPL IMBE implementation and patches are replaced in this source
+release. Other dependencies retain their original terms.
+Original dependency notices and attributions are preserved; see
+[THIRD_PARTY.md](THIRD_PARTY.md) for the component licenses.
 
 ## Support development
 

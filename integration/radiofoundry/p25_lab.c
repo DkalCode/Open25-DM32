@@ -1,10 +1,11 @@
-/* SPDX-License-Identifier: GPL-3.0-or-later */
-/* User-authorized development derivative; not an MIT-only upstream submission. */
+/* SPDX-License-Identifier: MIT */
+/* Conventional P25 worker and device/audio integration. */
 #include <string.h>
 #include "p25_lab.h"
 #include "selftest.h"
 #include "phy_stream.h"
 #include "audio_fifo.h"
+#include "mic_condition.h"
 #include "cpu_profile.h"
 #include "config.h"
 #include "board.h"
@@ -59,7 +60,7 @@ int p25_lab_set_channel(uint16_t receive_nac,uint16_t transmit_nac,uint16_t talk
 {
     taskENTER_CRITICAL();
     int ok=state!=1;
-    if(ok) {
+    if(ok){
         channel_rx_nac=receive_nac;
         channel_call=(p25_call){.nac=transmit_nac,.talkgroup=talkgroup,.source_id=radio_id};
     }
@@ -71,6 +72,7 @@ int p25_lab_channel_receiving(void)
 { return state==1 && request_mode==5 && channel_voice_seen && (uint32_t)(hal_millis()-channel_voice_ms)<650u; }
 #endif
 static volatile uint8_t live_released,live_capturing;
+static volatile uint32_t live_key_frame;
 static uint32_t live_mic_frames,live_peak,live_encode_max,live_encode_us,live_slow;
 static uint32_t live_first_us,live_last_us,live_encoded;
 static uint16_t live_fifo_high;
@@ -92,6 +94,12 @@ int p25_lab_live_begin(uint32_t sid)
     return ok;
 }
 void p25_lab_live_up(void) { live_released=1; }
+void p25_lab_live_key(void)
+{
+    /* Native RF callback runs with interrupts excluded; tag the first PCM
+     * block containing the switch, regardless of worker/FIFO scheduling. */
+    if(live_capturing)live_key_frame=live_mic_frames;
+}
 
 int p25_lab_channel_rx(uint32_t hz)
 {
@@ -145,6 +153,8 @@ static int live_run(void)
     const p25_call call={0x293,1,1,0,0,0};
 #endif
     int16_t pcm[160];
+    p25_mic_condition conditioner;
+    p25_mic_condition_init(&conditioner);
     uint8_t raw[36],queued=0;
     unsigned lead=3;
     bool kicked=false,sealed=false,closed=false;
@@ -152,6 +162,7 @@ static int live_run(void)
     uint32_t sid=live_sid;
     live_mic_frames=live_peak=live_encode_max=live_encode_us=live_slow=live_encoded=0;
     live_first_us=live_last_us=live_fifo_high=live_overflows=0;
+    live_key_frame=UINT32_MAX;
     native_state=NT_ARMED;
     native_reason=NT_OK;
     p25_audio_fifo_reset(&fifo);
@@ -202,10 +213,9 @@ static int live_run(void)
                     unsigned magnitude=(unsigned)(sample<0?-sample:sample);
                     if (magnitude>live_peak) live_peak=magnitude;
                 }
-            } else if (closing && voice.voice_count) {
-                memset(pcm,0,sizeof pcm);
-                have=1;
+                p25_mic_condition_block(&conditioner,pcm,live_encoded==live_key_frame);
             } else if (closing) {
+                /* Voice owns codec tail and LDU padding after the final PCM. */
                 ok=p25_voice_tx_end(&voice)!=0;
                 if (p25_voice_tx_done(&voice)) break; /* an empty PTT */
                 closed=true;
