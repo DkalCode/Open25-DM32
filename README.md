@@ -22,7 +22,7 @@ new interface with FM and conventional/trunked P25.
 | Conventional P25 · Original RadioFoundry interface | Trunked P25 · New interface |
 | ![Classic P25 channel settings with talkgroup and NAC](images/classic-settings.png) | ![Next P25 system settings with WACN and System ID](images/next-settings.png) |
 | P25 channel settings: talkgroup, NAC, and radio ID | Trunked system settings: WACN and System ID |
-| **0.1.0-rc1-r8 release candidate available** | **Source will be provided on release.** |
+| **0.1.0-rc1-r8 release candidate available** | **In development · source private.** |
 
 | Feature | Classic | Next |
 | --- | --- | --- |
@@ -81,7 +81,7 @@ Revision r5 fixed **Start new** when the radio still contains another firmware's
 settings. It initializes Classic's storage only after that choice and reports
 success after the new codeplug and requested edit are saved.
 
-This repository contains **Classic source only**. Next source remains unreleased.
+This repository contains **Classic source only**. Next source remains private.
 Firmware ZIPs are hosted on kd8zmm.com; GitHub contains no firmware downloads.
 See [BUILD.md](BUILD.md) to build Classic and its application-only installer ZIP,
 and [THIRD_PARTY.md](THIRD_PARTY.md) for dependency notices.
