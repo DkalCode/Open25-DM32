@@ -140,9 +140,44 @@ static void test_classic_idle_rearm(void)
     down.arg=0;CHECK(native_lab_request(&sm,&down)==1);classic_pump();classic_pump();classic_pump();
     CHECK(classic_live->state==NT_RX && !sm.ptt && !classic_live->keyed && !hw.tx_calls);
 }
+static uint8_t classic_band(uint32_t hz)
+{
+    sm.view.ch.mode=RADIO_MODE_P25;sm.view.ch.bw=RADIO_BW_12K5;sm.view.ch.rx_only=false;
+    sm.view.ch.p25_nac=0x293;sm.view.ch.p25_tx_nac_override=0;
+    sm.view.ch.p25_tg=42;sm.view.ch.p25_id=3101234;
+    sm.view.ch.tx_hz=hz;
+    return radio_sm_tx_check(&sm);
+}
+static void test_classic_full_band(void)
+{
+    classic_select(false);
+    /* Off (the default): P25 TX stays in 2 m / 70 cm; the radio's bands still bound FM/DMR. */
+    CHECK(!sm.set.p25_full_band && ui_svc_setting_get(UI_SET_P25_FULL_BAND)==0);
+    CHECK(classic_band(146520000)==TXDENY_NONE && classic_band(446000000)==TXDENY_NONE);
+    CHECK(classic_band(449990000)==TXDENY_NONE);
+    CHECK(classic_band(450000000)==TXDENY_BAND && classic_band(452075000)==TXDENY_BAND);
+    CHECK(classic_band(155000000)==TXDENY_BAND && classic_band(470000000)==TXDENY_BAND);
+    /* On: every band the radio transmits on, saved with the radio core's settings. */
+    ui_svc_apply(UI_SET_P25_FULL_BAND,1);run(20);
+    settings_t saved;settings_read(&saved);
+    CHECK(sm.set.p25_full_band && (saved.rs_flags & SETTINGS_RS_P25_FULL_BAND));
+    CHECK(ui_svc_setting_get(UI_SET_P25_FULL_BAND)==1);
+    CHECK(classic_band(452075000)==TXDENY_NONE && classic_band(136000000)==TXDENY_NONE);
+    CHECK(classic_band(174000000)==TXDENY_NONE && classic_band(400000000)==TXDENY_NONE);
+    CHECK(classic_band(480000000)==TXDENY_NONE);
+    /* The radio's own limits still apply. */
+    CHECK(classic_band(480000001)==TXDENY_BAND && classic_band(120000000)==TXDENY_BAND);
+    CHECK(classic_band(300000000)==TXDENY_BAND);
+    boot();CHECK(sm.set.p25_full_band); /* survives a power cycle */
+    ui_svc_apply(UI_SET_P25_FULL_BAND,0);run(20);settings_read(&saved);
+    CHECK(!sm.set.p25_full_band && !(saved.rs_flags & SETTINGS_RS_P25_FULL_BAND));
+    CHECK(classic_band(452075000)==TXDENY_BAND);
+    boot();CHECK(!sm.set.p25_full_band);
+}
 int main(void)
 {
     int prior=upstream_radio_main();test_classic_ownership();test_classic_idle_rearm();
+    test_classic_full_band();
     printf("Classic real FM/DMR/P25 admission and ownership: %d failures\n",failures);
     return prior || failures ? 1 : 0;
 }
